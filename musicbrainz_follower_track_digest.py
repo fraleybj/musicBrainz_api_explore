@@ -7,10 +7,9 @@ if __name__ == "__main__":
 
     ratingsDF = pd.read_csv("C:/Users/frale/Downloads/Listenbrainz follow ratings - Data.csv")
     max_ts = None #1758416820 2025-09-20 18:07:00
-    #max_ts = int(datetime.strptime("2025-09-24 17:35", "%Y-%m-%d %H:%M").timestamp())
+    #max_ts = int(datetime.strptime("2025-09-28 16:02:24", "%Y-%m-%d %H:%M:%S").timestamp())
     length_target = 12
     digestDF = pd.DataFrame({"timestamp": [], "user": [], "track": [], "artist": []})
-
     
     while len(digestDF) < length_target:
         feed_listens = get_feed_listens_following(max_ts = max_ts)
@@ -25,6 +24,27 @@ if __name__ == "__main__":
                 include_chance = include_chance * 0.1 ** (digestDF["user"] == event["metadata"]["user_name"]).sum()
             print("Final play chance: {0}".format(include_chance))
             rand_num = random.random()
+            #if rand_num > target, try saving throw. if pass, check tags. if no match, ditch (by setting high rand_num)
+            if rand_num >= include_chance:
+                rand_num = random.random()
+                if rand_num < include_chance:
+                    print("Saving throw! Checking artist tags")
+                    tags=("queer","lgbt","gay")
+                    tag_match = False
+                    if event["metadata"]["track_metadata"]["mbid_mapping"] is not None:
+                        for artist in event["metadata"]["track_metadata"]["mbid_mapping"]["artist_mbids"]:
+                            artist_info = get_artist_info(arid = artist)
+                            for tag in artist_info["tags"]:
+                                #print("Checking tag {0}".format(tag["name"]))
+                                if tag["count"] > 0 and any(search_tag in tag["name"].lower() for search_tag in tags):
+                                    print("Artist matched tags! Track saved!")
+                                    tag_match = True
+                                    break
+                            if tag_match:
+                                break
+                    if not tag_match:
+                        rand_num = 100
+                        print("No artist matched tags! Saving throw failed!")
             if rand_num < include_chance:
                 new_row = pd.DataFrame(
                     {"timestamp": [datetime.fromtimestamp(event["created"])],
