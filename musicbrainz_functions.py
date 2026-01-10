@@ -6,6 +6,8 @@ import pickle
 import os
 import re
 from datetime import datetime
+from dotenv import dotenv_values
+from urllib3.util.retry import Retry
 
 # Set DEBUG to True to test local dev server.
 # API keys for local dev server and the real server are different.
@@ -15,16 +17,35 @@ ROOT_MB = 'http://localhost:8100' if DEBUG else 'https://musicbrainz.org'
 
 # The following token must be valid, but it doesn't have to be the token of the user you're
 # trying to get the listen history of.
-with open('my_token.txt', 'r') as fp:
-    TOKEN = fp.read()
-fp.close()
-with open('my_user_agent_string.txt', 'r') as fp:
-    user_agent_string = fp.read()
-fp.close()
+#with open('my_token.txt', 'r') as fp:
+#    TOKEN = fp.read()
+#fp.close()
+#with open('my_user_agent_string.txt', 'r') as fp:
+#    user_agent_string = fp.read()
+#fp.close()
+secrets = dotenv_values("my_secrets.ini")
+
+MB_USERNAME = secrets["MB_USERNAME"]
+MB_PASSWORD = secrets["MB_PASSWORD"]
+MB_USER_AGENT = secrets["MB_USER_AGENT"]
+LB_TOKEN = secrets["LB_TOKEN"]
+
 header_LB = {
-    "Authorization": "Token {0}".format(TOKEN)
+    "Authorization": "Token {0}".format(LB_TOKEN)
 }
-header_MB = {'User-Agent': "{0}".format(user_agent_string)}
+header_MB = {'User-Agent': "{0}".format(MB_USER_AGENT)}
+
+def build_session():
+    retry = Retry(total = 3,
+                  connect=3,
+                  read=3,
+                  backoff_factor=1,
+                  allowed_methods=False,
+                  raise_on_status=False)
+    adapter = requests.adapters.HTTPAdapter(max_retries=retry,pool_maxsize=1)
+    s = requests.Session()
+    s.mount("https://", adapter)
+    return s
 
 def get_listens(username, min_ts=None, max_ts=None, count=None):
     """Gets the listen history of a given user.
@@ -57,7 +78,7 @@ def get_listens(username, min_ts=None, max_ts=None, count=None):
         # BUT requests with authorization headers are given relaxed rate limits by ListenBrainz
         headers=header_LB,
     )
-    
+    print(response.status_code)
     response.raise_for_status()
 
     return response.json()['payload']['listens']
@@ -90,7 +111,7 @@ def get_listening_activity(username, listen_range = "all_time"):
         # BUT requests with authorization headers are given relaxed rate limits by ListenBrainz
         headers=header_LB,
     )
-    
+    print(response.status_code)
     response.raise_for_status()
 
     return response.json()['payload']
@@ -120,7 +141,7 @@ def get_artists(username, listen_range = 'all_time', offset=None, include_payloa
         # BUT requests with authorization headers are given relaxed rate limits by ListenBrainz
         headers=header_LB,
     )
-
+    print(response.status_code)
     response.raise_for_status()
 
     if include_payload:
@@ -167,7 +188,7 @@ def get_area_artists(area = None, aid = None, offset=None):
         },
         headers=header_MB,
     )
-    
+    print(response.status_code)
     response.raise_for_status()
     
     if response.status_code != 200:
@@ -210,7 +231,7 @@ def get_artist_listen_count(mbid, listen_range = 'all_time'):
         },
         headers=header_LB,
     )
-
+    print(response.status_code)
     response.raise_for_status()
 
     if response.status_code == 204:
@@ -218,11 +239,13 @@ def get_artist_listen_count(mbid, listen_range = 'all_time'):
     
     return response.json()['payload']
 
-def get_artists_by_tag(tags, offset=None):
+def get_artists_by_tag(tags, offset=None,session=None):
     """Gets the artists from a list of tags
 
     Args:
-        tags: Area.
+        tags: A list of tags, will match if a tag contains the text
+        (i.e. searching tags="lgbt" will match on "lgbt" and "lgbtq".)
+        
         offest: How many artists to skip.
 
     Returns:
@@ -239,7 +262,7 @@ def get_artists_by_tag(tags, offset=None):
 
     # need to do a "prepared request" because requests.get swaps stuff to unicode characters
     # in a way that MusicBrainz doesn't understand
-    s = requests.Session()
+    s = session or requests.Session()
 
     req = requests.Request('GET',
         url="{0}/ws/2/artist".format(ROOT_MB),
@@ -257,6 +280,9 @@ def get_artists_by_tag(tags, offset=None):
     prepped.url = re.sub("tag.*",'tag:(*{0}*)'.format(tag_list),prepped.url)
     
     response = s.send(prepped)
+    if session is None:
+        s.close()
+
     response.raise_for_status()
     print(response.url)
     if response.status_code != 200:
@@ -278,7 +304,7 @@ def get_artists_by_tag(tags, offset=None):
     
     return response_filt
 
-def get_release_group_listen_count(mbid, listen_range = 'all_time'):
+def get_release_group_listen_count(mbid, listen_range = 'all_time',session=None):
     """Gets the top listeners for a release group and overall listen count.
 
     Args:
@@ -293,17 +319,21 @@ def get_release_group_listen_count(mbid, listen_range = 'all_time'):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/1/stats/release-group/{1}/listeners".format(ROOT_LB, mbid),
         params={
             "range": listen_range,
         },
         headers=header_LB,
     )
-
+    if session is None:
+        s.close()
+    print(response.status_code)
     response.raise_for_status()
-
+    if int(response.headers['X-RateLimit-Remaining']) < 2:
+        print("Near LB rate limit, cooling down...")
+        time.sleep(int(response.headers['X-RateLimit-Reset-In'])+2)
     if response.status_code == 204:
         return response.status_code
     
@@ -335,7 +365,7 @@ def get_fresh_releases(release_date = datetime.today().strftime('%Y-%m-%d')):
         },
         headers=header_LB,
     )
-
+    print(response.status_code)
     response.raise_for_status()
 
     if response.status_code == 204:
@@ -343,7 +373,7 @@ def get_fresh_releases(release_date = datetime.today().strftime('%Y-%m-%d')):
     
     return response.json()['payload']
 
-def get_release_groups_by_artist(arid, offset=None):
+def get_release_groups_by_artist(arid, offset=None,session=None):
     """Gets the release groups from an artist
 
     Args:
@@ -357,8 +387,8 @@ def get_release_groups_by_artist(arid, offset=None):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-    
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/ws/2/release-group".format(ROOT_MB),
         params={
             "fmt": "json",
@@ -367,10 +397,12 @@ def get_release_groups_by_artist(arid, offset=None):
         },
         headers=header_MB,
     )
-
+    if session is None:
+        s.close()
+    print(response.status_code)
     return response.json()
 
-def get_artist_info(arid,inc=["tags","aliases"]):
+def get_artist_info(arid,inc=["tags","aliases"],session=None):
     """Gets the artist info
 
     Args:
@@ -385,8 +417,8 @@ def get_artist_info(arid,inc=["tags","aliases"]):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-    
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/ws/2/artist/{1}".format(ROOT_MB,arid),
         params={
             "fmt": "json",
@@ -394,15 +426,18 @@ def get_artist_info(arid,inc=["tags","aliases"]):
         },
         headers=header_MB,
     )
-
+    if session is None:
+        s.close()
+    print(response.status_code)
+    
     return response.json()
 
-def get_feed_listens_following(user_name = "PupSniff",max_ts = None, min_ts  = None, count = None):
+def get_feed_listens_following(user_name = "PupSniff",max_ts = None, min_ts  = None, count = None,session=None):
     """Get feed’s listen events for followed users.
 
     """
-
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/1/user/{1}/feed/events/listens/following".format(ROOT_LB,user_name),
         params={
             "max_ts": max_ts,
@@ -411,10 +446,123 @@ def get_feed_listens_following(user_name = "PupSniff",max_ts = None, min_ts  = N
         },
         headers=header_LB,
     )
-
+    if session is None:
+        s.close()
+    print(response.status_code)
     response.raise_for_status()
 
     if response.status_code == 204:
         return response.status_code
     
     return response.json()['payload']
+
+def get_recording_popularity(mbid_list,session=None):
+    """Get the total listen count and total unique listeners count for a
+        given recording.
+
+    Args:
+        mbid_list: a list of recording mbids
+        
+    Returns:
+        Total listen count and total user count for each recording
+        
+    Raises:
+        An HTTPError if there's a failure.
+        A ValueError if the JSON in the response is invalid.
+        An IndexError if the JSON is not structured as expected.
+    """
+    s = session or requests.Session()
+    response = s.post(
+        url="{0}/1/popularity/recording".format(ROOT_LB),
+        json={
+            "recording_mbids": mbid_list
+        },
+        headers=header_LB,
+    )
+    if session is None:
+        s.close()
+    print(response.status_code)
+    response.raise_for_status()
+    if int(response.headers['X-RateLimit-Remaining']) < 2:
+        print("Near LB rate limit, cooling down...")
+        time.sleep(int(response.headers['X-RateLimit-Reset-In'])+2)
+        
+    if response.status_code == 204:
+        return response.status_code
+    
+    return response.json()
+
+def get_recording_info(mbid,inc=["releases"],session=None):
+    """Gets the recording info
+
+    Args:
+        mbid: recording mbid
+        inc: a list of elements to include
+
+    Returns:
+        Recording info
+
+    Raises:
+        An HTTPError if there's a failure.
+        A ValueError if the JSON in the response is invalid.
+        An IndexError if the JSON is not structured as expected.
+    """
+    s = session or requests.Session()
+    response = s.get(
+        url="{0}/ws/2/recording/{1}".format(ROOT_MB,mbid),
+        auth=requests.auth.HTTPDigestAuth(MB_USERNAME,MB_PASSWORD),
+        params={
+            "fmt": "json",
+            "inc": "+".join(inc)
+        },
+        headers=header_MB,
+    )
+    if session is None:
+        s.close()
+    print(response.status_code)
+    return response.json()
+
+def create_playlist(title,recording_mbid_list,public=True):
+    """Create a playlist for myself with the specified title
+    containing the specified tracks
+
+    """
+
+    rec_url_list = "https://musicbrainz.org/recording/" + recording_mbid_list
+    track_list = [{"identifier": track} for track in rec_url_list]
+
+    payload = {
+        "playlist" : {
+            "extension" : {
+                "https://musicbrainz.org/doc/jspf#playlist" : {
+                    "creator" : MB_USERNAME,
+                    "public" : public
+                }
+            },
+            "creator" : MB_USERNAME,
+            "title" : title,
+            "track" : track_list
+        }
+    }
+    response = requests.post(
+        url="{0}/1/playlist/create".format(ROOT_LB),
+        json=payload,
+        headers=header_LB,
+    )
+    print(response.status_code)
+    return response.json()
+
+def get_following(user_name = MB_USERNAME):
+    #Fetch the list of users followed by the user user_name
+
+    response = requests.get(
+        url="{0}/1/user/{1}/following".format(ROOT_LB,user_name),
+        headers=header_LB,
+    )
+    print(response.status_code)
+    response.raise_for_status()
+
+    if response.status_code == 204:
+        return response.status_code
+    
+    return response.json()
