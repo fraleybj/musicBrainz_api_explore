@@ -8,6 +8,7 @@ if __name__ == "__main__":
     n = 100
     dummy_row = {"user_count":-1}
     top_n = []
+    tag_list=("queer","lgbt","gay")
     for i in range(n):
         top_n.insert(0,dummy_row)
 
@@ -18,7 +19,13 @@ if __name__ == "__main__":
     checked_artists = []
     checked_releases = []
     listen_range = 'this_year'
-    fresh_threshold = '2025-06-01'
+    fresh_threshold = '2025-11-01'
+
+    mbSession = build_session()
+    mbSession.headers.update(header_MB)
+    lbSession = build_session()
+    lbSession.headers.update(header_LB)
+    
     offset_counter = 0
     if offset_counter > 0:
         if os.path.exists('top_hot_and_new_offset_{0}.data'.format(offset_counter - 25)):
@@ -29,7 +36,8 @@ if __name__ == "__main__":
             raise Exception("File hot_and_new_offset_{0}.data not found".format(offset_counter - 25))
     while offset_counter < 1000:
         print("Processed {0} artists. Fetching more.".format(offset_counter))
-        response = get_artists_by_tag(tags=("queer","lgbt","gay"),offset=offset_counter)
+        response = get_artists_by_tag(tags=tag_list,offset=offset_counter,session=mbSession)
+        time.sleep(2)
         with open('hot_and_new_offset_{0}.json'.format(offset_counter), 'w') as fp:
             json.dump(response, fp, indent = 4)
         fp.close()
@@ -55,7 +63,7 @@ if __name__ == "__main__":
             fp.close()
             release_group_offset_counter = 0
             while release_group_offset_counter < 1000:
-                release_groups = get_release_groups_by_artist(arid = artist["id"],offset=release_group_offset_counter)
+                release_groups = get_release_groups_by_artist(arid = artist["id"],offset=release_group_offset_counter,session=mbSession)
                 time.sleep(2)
                 if release_groups == 204:
                     print("For artist: {0}, No releases found".format(artist["name"]))
@@ -92,7 +100,7 @@ if __name__ == "__main__":
                         #                                                                         fresh_threshold))
                         continue
                     # lookup release group listens
-                    listen_count = get_release_group_listen_count(mbid=release_group["id"],listen_range = listen_range)
+                    listen_count = get_release_group_listen_count(mbid=release_group["id"],listen_range = listen_range,session=lbSession)
                     time.sleep(2)
                     if listen_count == 204:
                         print("For release: {0} by {1}, No listen history".format(release_group["title"],artist["name"]))
