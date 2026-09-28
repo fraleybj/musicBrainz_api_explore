@@ -116,7 +116,46 @@ def get_listening_activity(username, listen_range = "all_time"):
 
     return response.json()['payload']
 
-def get_artists(username, listen_range = 'all_time', offset=None, include_payload = False):
+def get_user_stats(username, listen_range = 'all_time', endpoint = 'artists', offset=None, include_payload = False, session=None):
+    """Gets the stats of a given user.
+
+    Args:
+        username: User to get listen history of.
+        offest: How many items to skip.
+        endpoint: which stat to return (i.e. artists, recordings, etc)
+
+    Returns:
+        A list of items corresponding to the chosen endpoint if there's an OK status.
+
+    Raises:
+        An HTTPError if there's a failure.
+        A ValueError if the JSON in the response is invalid.
+        An IndexError if the JSON is not structured as expected.
+    """
+    s = session or requests.Session()
+    response = s.get(
+        url="{0}/1/stats/user/{1}/{2}".format(ROOT_LB, username, endpoint),
+        params={
+            "range": listen_range,
+            "offset": offset,
+        },
+        headers=header_LB,
+    )
+    if session is None:
+        s.close()
+
+    print(response.status_code)
+    response.raise_for_status()
+
+    if response.status_code == 204:
+        return ""
+    
+    if include_payload:
+        return response.json()['payload']
+    else:
+        return response.json()['payload'][endpoint]
+
+def get_artists(username, listen_range = 'all_time', offset=None, include_payload = False,session=None):
     """Gets the artist stats of a given user.
 
     Args:
@@ -131,16 +170,18 @@ def get_artists(username, listen_range = 'all_time', offset=None, include_payloa
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/1/stats/user/{1}/artists".format(ROOT_LB, username),
         params={
             "range": listen_range,
             "offset": offset,
         },
-        # Note that an authorization header isn't compulsary for requests to get artists
-        # BUT requests with authorization headers are given relaxed rate limits by ListenBrainz
         headers=header_LB,
     )
+    if session is None:
+        s.close()
+
     print(response.status_code)
     response.raise_for_status()
 

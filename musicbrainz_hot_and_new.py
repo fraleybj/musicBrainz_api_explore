@@ -19,7 +19,7 @@ if __name__ == "__main__":
     checked_artists = []
     checked_releases = []
     listen_range = 'this_year'
-    fresh_threshold = '2025-11-01'
+    fresh_threshold = '2026-06-01'
 
     mbSession = build_session()
     mbSession.headers.update(header_MB)
