@@ -1,5 +1,5 @@
 from musicbrainz_functions import *
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import random
 
@@ -8,9 +8,14 @@ if __name__ == "__main__":
     ratingsURL = "https://docs.google.com/spreadsheets/d/1kOjkZy6jsM_qQl8ZTbBuWX3cmJV5c-GqbfJFsqjj6yA/export?format=csv&gid=0"
     ratingsDF = pd.read_csv(ratingsURL)
     max_ts = None #1758416820 2025-09-20 18:07:00
-    #max_ts = int(datetime.strptime("2025-09-28 16:02:24", "%Y-%m-%d %H:%M:%S").timestamp())
+    #max_ts = int(datetime.strptime("2026-09-22 16:02:24", "%Y-%m-%d %H:%M:%S").timestamp())
     length_target = 12
     sleeps_duration = 3
+    fresh_threshold = datetime.now() - timedelta(days = 90)
+    fresh_threshold = fresh_threshold.strftime('%Y-%m-%d')
+    popularity_threshold = 20
+    tags=("queer","lgbt","gay")
+    
     digestDF = pd.DataFrame({"timestamp": [], "user": [], "track": [], "artist": [], "recording_mbid": []})
 
     aveRating = ratingsDF["Rating"].mean()
@@ -32,42 +37,46 @@ if __name__ == "__main__":
                 include_chance = include_chance.iloc[0]            
             if event["metadata"]["user_name"] in digestDF["user"].values:
                 include_chance = include_chance * 0.05 ** (digestDF["user"] == event["metadata"]["user_name"]).sum()
-            print("Final play chance: {0}".format(include_chance))
+            print("{0}'s final play chance: {1}".format(event["metadata"]["user_name"],include_chance))
             rand_num = random.random()
             #if rand_num > target, try saving throw. if pass, check tags. if no match, ditch (by setting high rand_num)
             if rand_num >= include_chance:
                 rand_num = random.random()
                 if rand_num < include_chance:
                     print("Saving throw! Checking artist tags")
-                    tags=("queer","lgbt","gay")
-                    fresh_threshold = '2025-10-01'
                     tag_match = False
                     if event["metadata"]["track_metadata"]["mbid_mapping"] is not None:
-                        for artist in event["metadata"]["track_metadata"]["mbid_mapping"]["artist_mbids"]:
-                            artist_info = get_artist_info(arid = artist,session=mbSession)
-                            time.sleep(sleeps_duration)
-                            for tag in artist_info["tags"]:
-                                #print("Checking tag {0}".format(tag["name"]))
-                                if tag["count"] > 0 and any(search_tag in tag["name"].lower() for search_tag in tags):
-                                    print("Artist matched tags! Track saved!")
-                                    tag_match = True
+                        try:
+                            for artist in event["metadata"]["track_metadata"]["mbid_mapping"]["artist_mbids"]:
+                                artist_info = get_artist_info(arid = artist,session=mbSession)
+                                time.sleep(sleeps_duration)
+                                for tag in artist_info["tags"]:
+                                    #print("Checking tag {0}".format(tag["name"]))
+                                    if tag["count"] > 0 and any(search_tag in tag["name"].lower() for search_tag in tags):
+                                        print("Artist matched tags! Track saved!")
+                                        tag_match = True
+                                        break
+                                if tag_match:
                                     break
-                            if tag_match:
-                                break
+                        except:
+                            print("Artist lookup error, moving on.")
                         if not tag_match:
                             print("No artist matched tags! Checking first release date")
                             rec_mbid = event["metadata"]["track_metadata"]["mbid_mapping"]["recording_mbid"]
                             rec_info = get_recording_info(mbid=rec_mbid,session=mbSession)
                             time.sleep(sleeps_duration)
-                            if rec_info["first-release-date"] >= fresh_threshold:
-                                print("Track is fresh! Checking popularity")
-                                rec_pop = get_recording_popularity(mbid_list=[rec_mbid],session=lbSession)
-                                time.sleep(sleeps_duration)
-                                if rec_pop[0]["total_user_count"] is None:
-                                    rec_pop[0]["total_user_count"] = 0
-                                if rec_pop[0]["total_user_count"] > 25:
-                                    print("Track is popular! Track saved!")
-                                    tag_match = True
+                            try:
+                                if rec_info["first-release-date"] >= fresh_threshold:
+                                    print("Track is fresh! Checking popularity")
+                                    rec_pop = get_recording_popularity(mbid_list=[rec_mbid],session=lbSession)
+                                    time.sleep(sleeps_duration)
+                                    if rec_pop[0]["total_user_count"] is None:
+                                        rec_pop[0]["total_user_count"] = 0
+                                    if rec_pop[0]["total_user_count"] >= popularity_threshold:
+                                        print("Track is popular! Track saved!")
+                                        tag_match = True
+                            except:
+                                print("Release date or popularity lookup error, moving on.")
                     if not tag_match:
                         print("Saving throw failed.")
                         rand_num = 100
@@ -76,12 +85,19 @@ if __name__ == "__main__":
                 if event["metadata"]["track_metadata"]["mbid_mapping"] is not None:
                     if event["metadata"]["track_metadata"]["mbid_mapping"]["recording_mbid"] is not None:
                         rec_mbid = event["metadata"]["track_metadata"]["mbid_mapping"]["recording_mbid"]
+                        if any(rec_mbid == digestDF["recording_mbid"]):
+                            print("Recording is already in this digest, skipping.")
+                            continue
                         print("Checking if already rated")
                         user_rating = get_recording_info(mbid = rec_mbid,inc=["user-ratings"],session=mbSession)
                         time.sleep(sleeps_duration)
-                        if user_rating["user-rating"]["value"] is not None:
-                            print("Recording is already rated, skipping.")
-                            break
+                        try:
+                            if user_rating["user-rating"]["value"] is not None:
+                                print("Recording is already rated, skipping.")
+                                continue
+                        except:
+                            print("Something went wrong, skipping.")
+                            continue
                 new_row = pd.DataFrame(
                     {"timestamp": [datetime.fromtimestamp(event["created"])],
                      "user": [event["metadata"]["user_name"]],
