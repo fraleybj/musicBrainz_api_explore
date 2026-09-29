@@ -190,11 +190,11 @@ def get_artists(username, listen_range = 'all_time', offset=None, include_payloa
     else:
         return response.json()['payload']['artists']
 
-def get_area_artists(area = None, aid = None, offset=None):
+def get_area_artists(aid = None, offset=None,session=None):
     """Gets the artists from an area (either begin, area, or end).
 
     Args:
-        Area: Area.
+        aid: Area id.
         offest: How many artists to skip.
 
     Returns:
@@ -205,51 +205,28 @@ def get_area_artists(area = None, aid = None, offset=None):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-    if aid is not None:
-        area_response = requests.get(
-            url="{0}/ws/2/area".format(ROOT_MB),
-            params={
-                "fmt": "json",
-                "query": "aid:{0}".format(aid)
-            },
-            headers=header_MB,
-        )
-
-        area_response.raise_for_status()
-
-        area = area_response.json()["areas"][0]["name"]
-        time.sleep(1)
-        
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/ws/2/artist".format(ROOT_MB),
         params={
             "fmt": "json",
             "offset": offset,
-            "query": 'area:"{0}" OR beginarea:"{0}" OR endarea:"{0}"'.format(area)
+            "area": aid
         },
         headers=header_MB,
     )
+    if session is None:
+        s.close()
+        
     print(response.status_code)
     response.raise_for_status()
     
     if response.status_code != 200:
         print("No artists found")
-    response_filt = response.json()
-    if aid is not None:
-        #filtered = [x for x in response_filt["artists"] if (x['area']['id'] == aid or x['begin-area']['id'] == aid or x['end-area']['id'] == aid)]
-        for x in response_filt["artists"]:
-            if x.get('area') is None:
-                x.update({'area': {'id': 'None'}})
-            if x.get('begin-area') is None:
-                x.update({'begin-area': {'id': 'None'}})
-            if x.get('end-area') is None:
-                x.update({'end-area': {'id': 'None'}})
-        filtered = [x for x in response_filt["artists"] if (x['area']['id'] == aid or x['begin-area']['id'] == aid or x['end-area']['id'] == aid)]
-        response_filt["artists"] = filtered
     
-    return response_filt
+    return response.json()
 
-def get_artist_listen_count(mbid, listen_range = 'all_time'):
+def get_artist_listen_count(mbid, listen_range = 'all_time',session=None):
     """Gets the top listeners for an artist and overall listen count.
 
     Args:
@@ -264,16 +241,22 @@ def get_artist_listen_count(mbid, listen_range = 'all_time'):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/1/stats/artist/{1}/listeners".format(ROOT_LB, mbid),
         params={
             "range": listen_range,
         },
         headers=header_LB,
     )
+    if session is None:
+        s.close()
     print(response.status_code)
     response.raise_for_status()
+    print(response.headers['X-RateLimit-Remaining'])
+    if int(response.headers['X-RateLimit-Remaining']) < 2:
+        print("Near LB rate limit, cooling down...")
+        time.sleep(int(response.headers['X-RateLimit-Reset-In'])+2)
 
     if response.status_code == 204:
         return response.status_code
