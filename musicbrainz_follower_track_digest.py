@@ -7,8 +7,17 @@ if __name__ == "__main__":
 
     ratingsURL = "https://docs.google.com/spreadsheets/d/1kOjkZy6jsM_qQl8ZTbBuWX3cmJV5c-GqbfJFsqjj6yA/export?format=csv&gid=0"
     ratingsDF = pd.read_csv(ratingsURL)
-    max_ts = None #1758416820 2025-09-20 18:07:00
+    useRandomShift = True
+
+    max_ts = None
     #max_ts = int(datetime.strptime("2026-09-22 16:02:24", "%Y-%m-%d %H:%M:%S").timestamp())
+    if useRandomShift:
+        rand_num = random.random()
+        #start at a random point in the last 24 hours (to prevent bias)
+        max_ts = int(datetime.now().timestamp()) - int(rand_num*60*60*24)
+
+    print("Generating digest starting at {0}".format(datetime.fromtimestamp(max_ts).strftime('%Y-%m-%d %H:%M:%S')))
+    
     length_target = 12
     sleeps_duration = 3
     fresh_threshold = datetime.now() - timedelta(days = 90)
