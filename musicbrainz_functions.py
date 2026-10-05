@@ -5,9 +5,16 @@ import json
 import pickle
 import os
 import re
+import logging
 from datetime import datetime
 from dotenv import dotenv_values
 from urllib3.util.retry import Retry
+
+# Set some logging and display things
+SHOW_LOGS = True
+if SHOW_LOGS:
+    logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+    logging.getLogger("urllib3.util.retry").setLevel(logging.DEBUG)
 
 # Set DEBUG to True to test local dev server.
 # API keys for local dev server and the real server are different.
@@ -41,7 +48,8 @@ def build_session():
                   read=3,
                   backoff_factor=1,
                   allowed_methods=False,
-                  raise_on_status=False)
+                  raise_on_status=False,
+                  status_forcelist= [502, 503])
     adapter = requests.adapters.HTTPAdapter(max_retries=retry,pool_maxsize=1)
     s = requests.Session()
     s.mount("https://", adapter)
@@ -83,7 +91,7 @@ def get_listens(username, min_ts=None, max_ts=None, count=None):
 
     return response.json()['payload']['listens']
 
-def get_listening_activity(username, listen_range = "all_time"):
+def get_listening_activity(username, listen_range = "all_time", session=None):
     """Get the listening activity for user username.
     The listening activity shows the number of listens
     the user has submitted over a period of time.
@@ -102,15 +110,17 @@ def get_listening_activity(username, listen_range = "all_time"):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
-    response = requests.get(
+    s = session or requests.Session()
+    response = s.get(
         url="{0}/1/stats/user/{1}/listening-activity".format(ROOT_LB, username),
         params={
             "range": listen_range,
         },
-        # Note that an authorization header isn't compulsary for requests to get listens
-        # BUT requests with authorization headers are given relaxed rate limits by ListenBrainz
         headers=header_LB,
     )
+    if session is None:
+        s.close()
+    
     print(response.status_code)
     response.raise_for_status()
 
@@ -190,7 +200,7 @@ def get_artists(username, listen_range = 'all_time', offset=None, include_payloa
     else:
         return response.json()['payload']['artists']
 
-def get_area_artists(aid = None, offset=None,session=None):
+def get_area_artists(aid = None, offset=None,session=None,inc=None):
     """Gets the artists from an area (either begin, area, or end).
 
     Args:
@@ -205,14 +215,18 @@ def get_area_artists(aid = None, offset=None,session=None):
         A ValueError if the JSON in the response is invalid.
         An IndexError if the JSON is not structured as expected.
     """
+
+    params={
+        "fmt": "json",
+        "offset": offset,
+        "area": aid
+    }
+    if inc is not None:
+        params["inc"] = inc
     s = session or requests.Session()
     response = s.get(
         url="{0}/ws/2/artist".format(ROOT_MB),
-        params={
-            "fmt": "json",
-            "offset": offset,
-            "area": aid
-        },
+        params=params,
         headers=header_MB,
     )
     if session is None:
