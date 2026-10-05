@@ -90,7 +90,7 @@ if __name__ == "__main__":
                 if "tags" in artist:
                     for tag in artist["tags"]:
                         if tag["count"] < 1: continue
-                        if re.search("queer|gay|lgbt",tag["name"],flags=re.IGNORECASE):
+                        if re.search("|".join(tags),tag["name"],flags=re.IGNORECASE):
                             tag_match = True
                 if not tag_match: continue
             # lookup artist listens
