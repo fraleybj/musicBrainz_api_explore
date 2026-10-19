@@ -1,7 +1,9 @@
-from musicbrainz_functions import *
-from datetime import datetime, timedelta
-import pandas as pd
 import random
+from datetime import datetime, timedelta
+
+import pandas as pd
+
+from musicbrainz_functions import *
 
 if __name__ == "__main__":
 
@@ -16,7 +18,7 @@ if __name__ == "__main__":
         #start at a random point in the last 24 hours (to prevent bias)
         max_ts = int(datetime.now().timestamp()) - int(rand_num*60*60*24)
 
-    print("Generating digest starting at {0}".format(datetime.fromtimestamp(max_ts).strftime('%Y-%m-%d %H:%M:%S')))
+    print(f"Generating digest starting at {datetime.fromtimestamp(max_ts).strftime('%Y-%m-%d %H:%M:%S')}")
     
     length_target = 12
     sleeps_duration = 3
@@ -46,7 +48,7 @@ if __name__ == "__main__":
                 include_chance = include_chance.iloc[0]            
             if event["metadata"]["user_name"] in digestDF["user"].values:
                 include_chance = include_chance * 0.05 ** (digestDF["user"] == event["metadata"]["user_name"]).sum()
-            print("{0}'s final play chance: {1}".format(event["metadata"]["user_name"],include_chance))
+            print("{}'s final play chance: {}".format(event["metadata"]["user_name"],include_chance))
             rand_num = random.random()
             #if rand_num > target, try saving throw. if pass, check tags. if no match, ditch (by setting high rand_num)
             if rand_num >= include_chance:
@@ -54,7 +56,12 @@ if __name__ == "__main__":
                 if rand_num < include_chance:
                     print("Saving throw! Checking artist tags")
                     tag_match = False
-                    if event["metadata"]["track_metadata"]["mbid_mapping"] is not None:
+                    mbid_mapping = (
+                        event.get("metadata", {})
+                        .get("track_metadata", {})
+                        .get("mbid_mapping", {})
+                    )
+                    if mbid_mapping:
                         try:
                             for artist in event["metadata"]["track_metadata"]["mbid_mapping"]["artist_mbids"]:
                                 artist_info = get_artist_info(arid = artist,session=mbSession)
@@ -67,7 +74,7 @@ if __name__ == "__main__":
                                         break
                                 if tag_match:
                                     break
-                        except:
+                        except Exception:
                             print("Artist lookup error, moving on.")
                         if not tag_match:
                             print("No artist matched tags! Checking first release date")
@@ -84,29 +91,30 @@ if __name__ == "__main__":
                                     if rec_pop[0]["total_user_count"] >= popularity_threshold:
                                         print("Track is popular! Track saved!")
                                         tag_match = True
-                            except:
+                            except Exception:
                                 print("Release date or popularity lookup error, moving on.")
                     if not tag_match:
                         print("Saving throw failed.")
                         rand_num = 100
             if rand_num < include_chance:
-                rec_mbid = ""
-                if event["metadata"]["track_metadata"]["mbid_mapping"] is not None:
-                    if event["metadata"]["track_metadata"]["mbid_mapping"]["recording_mbid"] is not None:
-                        rec_mbid = event["metadata"]["track_metadata"]["mbid_mapping"]["recording_mbid"]
-                        if any(rec_mbid == digestDF["recording_mbid"]):
-                            print("Recording is already in this digest, skipping.")
-                            continue
-                        print("Checking if already rated")
-                        user_rating = get_recording_info(mbid = rec_mbid,inc=["user-ratings"],session=mbSession)
-                        time.sleep(sleeps_duration)
-                        try:
-                            if user_rating["user-rating"]["value"] is not None:
-                                print("Recording is already rated, skipping.")
-                                continue
-                        except:
-                            print("Something went wrong, skipping.")
-                            continue
+                try:
+                    rec_mbid = event["metadata"]["track_metadata"]["mbid_mapping"]["recording_mbid"]
+                except(KeyError, TypeError):
+                    print("No recording mbid found, skipping")
+                    continue
+                if any(rec_mbid == digestDF["recording_mbid"]):
+                    print("Recording is already in this digest, skipping.")
+                    continue
+                print("Checking if already rated")
+                user_rating = get_recording_info(mbid = rec_mbid,inc=["user-ratings"],session=mbSession)
+                time.sleep(sleeps_duration)
+                try:
+                    if user_rating["user-rating"]["value"] is not None:
+                        print("Recording is already rated, skipping.")
+                        continue
+                except Exception:
+                    print("Something went wrong, skipping.")
+                    continue
                 new_row = pd.DataFrame(
                     {"timestamp": [datetime.fromtimestamp(event["created"])],
                      "user": [event["metadata"]["user_name"]],
@@ -117,13 +125,13 @@ if __name__ == "__main__":
                     digestDF = new_row
                 else:
                     digestDF = pd.concat([digestDF, new_row],ignore_index=True)
-                print("Added row to digest. {0} listened to {1} by {2} at {3}".format(
+                print("Added row to digest. {} listened to {} by {} at {}".format(
                     event["metadata"]["user_name"],
                     event["metadata"]["track_metadata"]["track_name"],
                     event["metadata"]["track_metadata"]["artist_name"],
                     datetime.fromtimestamp(event["created"])
                 ))
-                print("Digest length at {0} of {1}".format(len(digestDF),length_target))
+                print(f"Digest length at {len(digestDF)} of {length_target}")
             max_ts = event["created"]
             if len(digestDF) >= length_target:
                 print("Digest complete") 
